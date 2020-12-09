@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::env::args;
+use std::rc::Rc;
 
 use image::{Rgb, RgbImage};
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Color {
     Blue,
     Green,
@@ -66,10 +68,60 @@ impl MsPaint for RgbImage {
 }
 
 #[derive(Debug)]
+pub enum UnresolvedFlagGeometry {
+    Solid(Color),
+    Horizontal(Rc<UnresolvedFlagGeometry>, Rc<UnresolvedFlagGeometry>, u32),
+    Vertical(Rc<UnresolvedFlagGeometry>, Rc<UnresolvedFlagGeometry>, u32),
+    Tag(String, Rc<UnresolvedFlagGeometry>),
+    Reference(String),
+}
+
+impl UnresolvedFlagGeometry {
+    pub fn tags(&self) -> HashMap<String, Rc<UnresolvedFlagGeometry>> {
+        let mut map = HashMap::new();
+        match self {
+            UnresolvedFlagGeometry::Tag(tag, geo) => {
+                map.extend(geo.tags());
+                map.insert(tag.clone(), geo.clone());
+            }
+            UnresolvedFlagGeometry::Horizontal(car, cdr, ..)
+            | UnresolvedFlagGeometry::Vertical(car, cdr, ..) => {
+                map.extend(car.tags());
+                map.extend(cdr.tags());
+            }
+            _ => {}
+        }
+
+        map
+    }
+
+    pub fn resolve(
+        &self,
+        tags: &HashMap<String, Rc<UnresolvedFlagGeometry>>,
+    ) -> Option<FlagGeometry> {
+        match self {
+            UnresolvedFlagGeometry::Solid(color) => Some(FlagGeometry::Solid(*color)),
+            UnresolvedFlagGeometry::Horizontal(car, cdr, pivot) => Some(FlagGeometry::Horizontal(
+                Rc::new(car.resolve(tags)?),
+                Rc::new(cdr.resolve(tags)?),
+                *pivot,
+            )),
+            UnresolvedFlagGeometry::Vertical(car, cdr, pivot) => Some(FlagGeometry::Vertical(
+                Rc::new(car.resolve(tags)?),
+                Rc::new(cdr.resolve(tags)?),
+                *pivot,
+            )),
+            UnresolvedFlagGeometry::Tag(_, geo) => geo.resolve(tags),
+            UnresolvedFlagGeometry::Reference(tag) => tags.get(tag).and_then(|x| x.resolve(tags)),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum FlagGeometry {
     Solid(Color),
-    Horizontal(Box<FlagGeometry>, Box<FlagGeometry>, u32),
-    Vertical(Box<FlagGeometry>, Box<FlagGeometry>, u32),
+    Horizontal(Rc<FlagGeometry>, Rc<FlagGeometry>, u32),
+    Vertical(Rc<FlagGeometry>, Rc<FlagGeometry>, u32),
 }
 
 impl FlagGeometry {
@@ -144,6 +196,14 @@ impl SExpr {
             input.next();
         }
 
+        while let Some(c) = input.peek() {
+            if c.is_whitespace() {
+                input.next();
+            } else {
+                break;
+            }
+        }
+
         sexpr
     }
 
@@ -161,23 +221,32 @@ impl SExpr {
         }
     }
 
-    pub fn to_flag_geometry(&self) -> Option<FlagGeometry> {
+    pub fn to_flag_geometry(&self) -> Option<UnresolvedFlagGeometry> {
         let list = self.list()?;
 
         match list {
             [op, c] if op.literal()? == "s" => {
                 let color = c.literal().and_then(|lit| lit.parse().ok())?;
-                Some(FlagGeometry::Solid(color))
+                Some(UnresolvedFlagGeometry::Solid(color))
             }
             [op, pivot, car, cdr] => {
                 let pivot = pivot.literal().and_then(|lit| lit.parse().ok())?;
-                let car = Box::new(car.to_flag_geometry()?);
-                let cdr = Box::new(cdr.to_flag_geometry()?);
+                let car = Rc::new(car.to_flag_geometry()?);
+                let cdr = Rc::new(cdr.to_flag_geometry()?);
                 match op.literal()? {
-                    "h" => Some(FlagGeometry::Horizontal(car, cdr, pivot)),
-                    "v" => Some(FlagGeometry::Vertical(car, cdr, pivot)),
+                    "h" => Some(UnresolvedFlagGeometry::Horizontal(car, cdr, pivot)),
+                    "v" => Some(UnresolvedFlagGeometry::Vertical(car, cdr, pivot)),
                     _ => None,
                 }
+            }
+            [op, tag, geo] if op.literal()? == "t" => {
+                let tag = tag.literal()?.to_string();
+                let geo = Rc::new(geo.to_flag_geometry()?);
+                Some(UnresolvedFlagGeometry::Tag(tag, geo))
+            }
+            [op, tag] if op.literal()? == "r" => {
+                let tag = tag.literal()?.to_string();
+                Some(UnresolvedFlagGeometry::Reference(tag))
             }
             _ => {
                 eprintln!("{:?}", list);
@@ -192,6 +261,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .and_then(|fdl| SExpr::parse(&mut fdl.chars().peekable()))
         .and_then(|sexpr| sexpr.to_flag_geometry())
+        .and_then(|ufg| {
+            let tags = ufg.tags();
+            ufg.resolve(&tags)
+        })
         .unwrap();
 
     eprintln!("{:#?}", flag);
