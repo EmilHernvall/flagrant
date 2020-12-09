@@ -30,3 +30,5 @@ The following colors are supported:
  * `g` - green
  * `r` - red
  * `w` - white
+ * `y` - yellow
+ * `s` - black

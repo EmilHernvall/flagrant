@@ -8,6 +8,8 @@ pub enum Color {
     Green,
     Red,
     White,
+    Yellow,
+    Black,
 }
 
 impl Color {
@@ -17,6 +19,8 @@ impl Color {
             Color::Green => [0, 255, 0].into(),
             Color::Red => [255, 0, 0].into(),
             Color::White => [255, 255, 255].into(),
+            Color::Yellow => [255, 255, 0].into(),
+            Color::Black => [0, 0, 0].into(),
         }
     }
 }
@@ -30,6 +34,8 @@ impl std::str::FromStr for Color {
             "g" => Ok(Color::Green),
             "r" => Ok(Color::Red),
             "w" => Ok(Color::White),
+            "y" => Ok(Color::Yellow),
+            "s" => Ok(Color::Black),
             _ => Err(()),
         }
     }
