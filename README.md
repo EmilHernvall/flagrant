@@ -7,31 +7,28 @@ Stockholm.
 Flag of Madagascar:
 
 ```
-cargo run -- "(h 33 (s w) (v 50 (s r) (s g)))"
+cargo run -- "(h 1 (s w) 2 (v 1 (s r) 1 (s g)))"
 ```
 
 Flag of France:
 
 ```
-cargo run -- "(h 33 (s b) (h 50 (s w) (s r)))"
+cargo run -- "(h 1 (s b) 1 (s w) 1 (s r))"
 ```
 
 Flag of Sweden:
 
 ```
 cargo run -- "
-(v 40
-    (t top_strip
-        (h 40
-            (h 65 (s b) (s y))
-            (s b)
-        )
-    )
-    (v 30
-        (s y)
-        (r top_strip)
-    )
-)"
+(v
+    2 (t top
+        (h
+            2 (s b)
+            1 (s y)
+            3 (s b)))
+    1 (s y)
+    2 (r top))
+"
 ```
 
 The Flag Definition Language (tm) is based on S-expressions on the following

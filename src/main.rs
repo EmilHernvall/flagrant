@@ -68,10 +68,22 @@ impl MsPaint for RgbImage {
 }
 
 #[derive(Debug)]
+pub struct UnresolvedFlagElement(UnresolvedFlagGeometry, u32);
+
+impl UnresolvedFlagElement {
+    pub fn resolve(
+        &self,
+        tags: &HashMap<String, Rc<UnresolvedFlagGeometry>>,
+    ) -> Option<FlagElement> {
+        Some(FlagElement(self.0.resolve(tags)?, self.1))
+    }
+}
+
+#[derive(Debug)]
 pub enum UnresolvedFlagGeometry {
     Solid(Color),
-    Horizontal(Rc<UnresolvedFlagGeometry>, Rc<UnresolvedFlagGeometry>, u32),
-    Vertical(Rc<UnresolvedFlagGeometry>, Rc<UnresolvedFlagGeometry>, u32),
+    Horizontal(Vec<UnresolvedFlagElement>),
+    Vertical(Vec<UnresolvedFlagElement>),
     Tag(String, Rc<UnresolvedFlagGeometry>),
     Reference(String),
 }
@@ -84,10 +96,9 @@ impl UnresolvedFlagGeometry {
                 map.extend(geo.tags());
                 map.insert(tag.clone(), geo.clone());
             }
-            UnresolvedFlagGeometry::Horizontal(car, cdr, ..)
-            | UnresolvedFlagGeometry::Vertical(car, cdr, ..) => {
-                map.extend(car.tags());
-                map.extend(cdr.tags());
+            UnresolvedFlagGeometry::Horizontal(elements)
+            | UnresolvedFlagGeometry::Vertical(elements) => {
+                map.extend(elements.iter().flat_map(|el| el.0.tags().into_iter()));
             }
             _ => {}
         }
@@ -101,15 +112,17 @@ impl UnresolvedFlagGeometry {
     ) -> Option<FlagGeometry> {
         match self {
             UnresolvedFlagGeometry::Solid(color) => Some(FlagGeometry::Solid(*color)),
-            UnresolvedFlagGeometry::Horizontal(car, cdr, pivot) => Some(FlagGeometry::Horizontal(
-                Rc::new(car.resolve(tags)?),
-                Rc::new(cdr.resolve(tags)?),
-                *pivot,
+            UnresolvedFlagGeometry::Horizontal(elements) => Some(FlagGeometry::Horizontal(
+                elements
+                    .iter()
+                    .filter_map(|x| x.resolve(tags))
+                    .collect::<Vec<_>>(),
             )),
-            UnresolvedFlagGeometry::Vertical(car, cdr, pivot) => Some(FlagGeometry::Vertical(
-                Rc::new(car.resolve(tags)?),
-                Rc::new(cdr.resolve(tags)?),
-                *pivot,
+            UnresolvedFlagGeometry::Vertical(elements) => Some(FlagGeometry::Vertical(
+                elements
+                    .iter()
+                    .filter_map(|x| x.resolve(tags))
+                    .collect::<Vec<_>>(),
             )),
             UnresolvedFlagGeometry::Tag(_, geo) => geo.resolve(tags),
             UnresolvedFlagGeometry::Reference(tag) => tags.get(tag).and_then(|x| x.resolve(tags)),
@@ -118,10 +131,13 @@ impl UnresolvedFlagGeometry {
 }
 
 #[derive(Debug)]
+pub struct FlagElement(FlagGeometry, u32);
+
+#[derive(Debug)]
 pub enum FlagGeometry {
     Solid(Color),
-    Horizontal(Rc<FlagGeometry>, Rc<FlagGeometry>, u32),
-    Vertical(Rc<FlagGeometry>, Rc<FlagGeometry>, u32),
+    Horizontal(Vec<FlagElement>),
+    Vertical(Vec<FlagElement>),
 }
 
 impl FlagGeometry {
@@ -130,25 +146,23 @@ impl FlagGeometry {
             FlagGeometry::Solid(color) => {
                 buffer.rectangle(left, top, width, height, color);
             }
-            FlagGeometry::Horizontal(car, cdr, pivot) => {
-                car.draw_area(buffer, left, top, (pivot * width) / 100, height);
-                cdr.draw_area(
-                    buffer,
-                    left + (pivot * width) / 100,
-                    top,
-                    ((100 - pivot) * width) / 100,
-                    height,
-                );
+            FlagGeometry::Horizontal(elements) => {
+                let total: u32 = elements.iter().map(|x| x.1).sum();
+                let mut offset = left;
+                for FlagElement(geo, pivot) in elements {
+                    let element_width = (pivot * width) / total;
+                    geo.draw_area(buffer, offset, top, element_width, height);
+                    offset += element_width;
+                }
             }
-            FlagGeometry::Vertical(car, cdr, pivot) => {
-                car.draw_area(buffer, left, top, width, (pivot * height) / 100);
-                cdr.draw_area(
-                    buffer,
-                    left,
-                    top + (pivot * height) / 100,
-                    width,
-                    ((100 - pivot) * height) / 100,
-                );
+            FlagGeometry::Vertical(elements) => {
+                let total: u32 = elements.iter().map(|x| x.1).sum();
+                let mut offset = top;
+                for FlagElement(geo, pivot) in elements {
+                    let element_height = (pivot * height) / total;
+                    geo.draw_area(buffer, left, offset, width, element_height);
+                    offset += element_height;
+                }
             }
         }
     }
@@ -229,16 +243,27 @@ impl SExpr {
                 let color = c.literal().and_then(|lit| lit.parse().ok())?;
                 Some(UnresolvedFlagGeometry::Solid(color))
             }
-            [op, pivot, car, cdr] => {
-                let pivot = pivot.literal().and_then(|lit| lit.parse().ok())?;
-                let car = Rc::new(car.to_flag_geometry()?);
-                let cdr = Rc::new(cdr.to_flag_geometry()?);
+            [op, ..] if op.literal()? == "h" || op.literal()? == "v" => {
+                let weights = list[1..]
+                    .iter()
+                    .step_by(2)
+                    .filter_map(|x| x.literal())
+                    .filter_map(|x| x.parse().ok());
+                let geos = list[2..].iter().step_by(2);
+
+                let mut elements = Vec::new();
+                for (weight, geo) in weights.zip(geos) {
+                    let geo = geo.to_flag_geometry()?;
+                    elements.push(UnresolvedFlagElement(geo, weight));
+                }
+
                 match op.literal()? {
-                    "h" => Some(UnresolvedFlagGeometry::Horizontal(car, cdr, pivot)),
-                    "v" => Some(UnresolvedFlagGeometry::Vertical(car, cdr, pivot)),
+                    "h" => Some(UnresolvedFlagGeometry::Horizontal(elements)),
+                    "v" => Some(UnresolvedFlagGeometry::Vertical(elements)),
                     _ => None,
                 }
             }
+            [op, ..] if op.literal()? == "v" => unimplemented!(),
             [op, tag, geo] if op.literal()? == "t" => {
                 let tag = tag.literal()?.to_string();
                 let geo = Rc::new(geo.to_flag_geometry()?);
