@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::env::args;
 use std::rc::Rc;
 
 use image::{Rgb, RgbImage};
@@ -12,6 +11,7 @@ pub enum Color {
     White,
     Yellow,
     Black,
+    Rgb(Rgb<u8>),
 }
 
 impl Color {
@@ -23,8 +23,28 @@ impl Color {
             Color::White => [255, 255, 255].into(),
             Color::Yellow => [255, 255, 0].into(),
             Color::Black => [0, 0, 0].into(),
+            Color::Rgb(rgb) => *rgb,
         }
     }
+}
+
+fn to_hex_color(input: &str) -> Option<Rgb<u8>> {
+    if input.len() != 7 {
+        return None;
+    }
+    if !input.starts_with("#") {
+        return None;
+    }
+
+    let hex = input[1..].chars()
+        .filter_map(|x| x.to_digit(16))
+        .map(|x| x as u8)
+        .collect::<Vec<_>>();
+    if hex.len() != 6 {
+        return None;
+    }
+
+    Some([(hex[0] << 4) | hex[1], (hex[2] << 4) | hex[3], (hex[4] << 4) | hex[5]].into())
 }
 
 impl std::str::FromStr for Color {
@@ -38,6 +58,7 @@ impl std::str::FromStr for Color {
             "w" => Ok(Color::White),
             "y" => Ok(Color::Yellow),
             "s" => Ok(Color::Black),
+            _ if to_hex_color(s).is_some() => to_hex_color(s).ok_or(()).map(Color::Rgb),
             _ => Err(()),
         }
     }
@@ -279,26 +300,6 @@ impl SExpr {
             }
         }
     }
-}
-
-fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let flag = args()
-        .nth(1)
-        .and_then(|fdl| SExpr::parse(&mut fdl.chars().peekable()))
-        .and_then(|sexpr| sexpr.to_flag_geometry())
-        .and_then(|ufg| {
-            let tags = ufg.tags();
-            ufg.resolve(&tags)
-        })
-        .unwrap();
-
-    eprintln!("{:#?}", flag);
-
-    let mut img = RgbImage::new(400, 300);
-    flag.draw(&mut img);
-    img.save("out.png")?;
-
-    Ok(())
 }
 
 #[cfg(test)]
