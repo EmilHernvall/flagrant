@@ -38,9 +38,9 @@ The Flag Definition Language (tm) is based on S-expressions on the following
 format:
 
  * `(s b)` - a solid, where the second letter denotes the color.
- * `(v x y p)` - a vertical split, where `x` and `y` are nested expressions and
+ * `(v p x y)` - a vertical split, where `x` and `y` are nested expressions and
    `p` is the percentage of the available space to allocate to `x`.
- * `(h x y p)` - a horizontal split that works like the vertical split above
+ * `(h p x y)` - a horizontal split that works like the vertical split above
  * `(t tag subexpr)` - tag a subexpr with the name `tag`
  * `(r tag)` - reference a subexpr named `tag`
 
